@@ -101,35 +101,36 @@ class ConfigUi:
       checked = (orgOrUser, repo) in enabledSet
       choices.append((repo, repo, checked))
     while True:
-      checkboxValues = [
-        (repo, repo) for repo in repos
-      ] + [("back", "< Back to Org/User Menu>")]
+      choices = [(repo, repo) for repo in repos]
+      defaultValues = [repo for repo in repos if (orgOrUser, repo) in enabledSet]
       result = checkboxlist_dialog(
         title=f"Repositories for {orgOrUser}",
         text="Enable/disable repositories:",
-        values=checkboxValues,
+        values=choices + [("back", "< Back to Org/User Menu>")],
+        default_values=defaultValues,
         ok_text="Apply",
         cancel_text="Back"
       ).run()
       if result is None or "back" in result:
         logging.info("Returning to Org/User menu.")
         return
-      # Update enabled_repos
+      #Update enabled_repos for this org/user—remove old, add new
       self.config['enabled_repos'] = [
         r for r in self.config['enabled_repos']
         if r['org'] != orgOrUser
       ]
       for repo in result:
-        if repo == "back":
-          continue
-        self.config['enabled_repos'].append({'org': orgOrUser, 'repo_name': repo})
+        if repo != "back":
+          self.config['enabled_repos'].append({'org': orgOrUser, 'repo_name': repo})
+          logging.info(f"Enabled repo {repo} for {orgOrUser}")
       self.saveConfig()
+      #Refresh enabledSet for next loop iteration
       enabledSet = set(
         (r['org'], r['repo_name'])
         for r in self.config['enabled_repos']
       )
-      logging.info(f"Enabled repos for {orgOrUser}: {result}")
-
+      
+  
 if __name__ == '__main__':
   ui = ConfigUi()
   ui.run()
