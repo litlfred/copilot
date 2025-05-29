@@ -10,8 +10,9 @@ An object-oriented, importable Python module for interacting with GitHub Copilot
 
 import subprocess
 import logging
-import json
 import shutil
+import re
+from typing import Dict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -39,10 +40,11 @@ class GoGoCopilot:
 
     def suggest_solution(
         self, org: str, repo_name: str, issue_num: int
-    ) -> dict:
+    ) -> Dict[str, object]:
         """
         Asks GitHub Copilot to suggest a solution for a GitHub issue.
         Returns a dict with keys 'explanation' and 'files'.
+        Uses stdin to pass the prompt to `gh copilot suggest` due to known CLI limitations.
         """
         prompt = (
             f"Please review the issue at @{org}/{repo_name}/issue/{issue_num} including all of the comments. "
@@ -52,25 +54,56 @@ class GoGoCopilot:
         )
         logging.info(f"Requesting solution from Copilot for {org}/{repo_name} issue #{issue_num}")
         try:
-            # This assumes a Copilot CLI interface that can take prompt and output JSON
+            # Pass prompt via stdin, capture output as plain text (markdown)
             result = subprocess.check_output(
-                [
-                    "gh",
-                    "copilot",
-                    "suggest",
-                    "--repo",
-                    f"{org}/{repo_name}",
-                    "--issue",
-                    str(issue_num),
-                    "--prompt",
-                    prompt,
-                    "--json"
-                ],
+                ["gh", "copilot", "suggest"],
+                input=prompt,
                 text=True,
+                stderr=subprocess.STDOUT,
             )
-            data = json.loads(result)
-            explanation = data.get("explanation", "")
-            files = data.get("files", {})
+            # Parse output for explanation and files (expect markdown with code blocks)
+            explanation, files = self._parse_copilot_output(result)
             return {"explanation": explanation, "files": files}
+        except subprocess.CalledProcessError as e:
+            raise GoGoCopilotError(f"Failed to get solution from Copilot: {e.output.strip()}")
         except Exception as e:
             raise GoGoCopilotError(f"Failed to get solution from Copilot: {e}")
+
+    def _parse_copilot_output(self, output: str):
+        """
+        Very basic parser for Copilot markdown output.
+        Extracts an explanation (first non-code content) and code blocks as files.
+        Expects code blocks in the format: ```filename.ext\n...code...\n```
+        """
+        explanation_lines = []
+        files = {}
+        cur_file = None
+        cur_code = []
+        in_code = False
+        code_block_re = re.compile(r"^```([^\n]+)")
+        lines = output.splitlines()
+        for line in lines:
+            if not in_code and line.startswith("```"):
+                m = code_block_re.match(line)
+                if m:
+                    cur_file = m.group(1).strip()
+                    cur_code = []
+                    in_code = True
+                else:
+                    in_code = True
+                    cur_file = None
+                    cur_code = []
+            elif in_code and line.startswith("```"):
+                if cur_file:
+                    files[cur_file] = "\n".join(cur_code)
+                in_code = False
+                cur_file = None
+                cur_code = []
+            elif in_code:
+                cur_code.append(line)
+            elif not in_code:
+                explanation_lines.append(line)
+        explanation = "\n".join(explanation_lines).strip()
+        if not files and not explanation:
+            explanation = output.strip()
+        return explanation, files
