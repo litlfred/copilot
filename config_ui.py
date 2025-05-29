@@ -1,0 +1,135 @@
+import json
+import os
+import logging
+from github_manager import GitHubManager
+
+try:
+  from prompt_toolkit.shortcuts import checkboxlist_dialog, button_dialog, radiolist_dialog
+except ImportError:
+  raise ImportError("Install prompt_toolkit: pip install prompt_toolkit")
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
+
+class ConfigUi:
+  def __init__(self, configFilePath='config.json', appName='CopilotConfigUI'):
+    self.configFilePath = configFilePath
+    self.appName = appName
+    self.githubManager = GitHubManager()
+    self.config = self.loadConfig()
+    logging.info(f"Initialized {self.appName} with config file: {self.configFilePath}")
+
+  def loadConfig(self):
+    if not os.path.exists(self.configFilePath):
+      logging.info(f"Config file {self.configFilePath} not found. Creating default config.")
+      config = {'enabled_repos': []}
+      self.saveConfig(config)
+    else:
+      with open(self.configFilePath, 'r') as f:
+        config = json.load(f)
+      if 'enabled_repos' not in config:
+        config['enabled_repos'] = []
+    return config
+
+  def saveConfig(self, config=None):
+    config = config or self.config
+    with open(self.configFilePath, 'w') as f:
+      json.dump(config, f, indent=2)
+    logging.info(f"Saved configuration to {self.configFilePath}")
+
+  def run(self):
+    self.topLevelMenu()
+
+  def _getAuthenticatedUsername(self):
+    # Try several common patterns for username retrieval
+    if hasattr(self.githubManager, 'get_authenticated_username'):
+      return self.githubManager.get_authenticated_username()
+    if hasattr(self.githubManager, 'get_username'):
+      return self.githubManager.get_username()
+    if hasattr(self.githubManager, 'username'):
+      return self.githubManager.username
+    if hasattr(self.githubManager, 'user'):
+      return self.githubManager.user
+    logging.error(
+      "Could not find a method to get the authenticated username in GitHubManager. "
+      "Please implement get_authenticated_username(), get_username(), or a .username property."
+    )
+    raise AttributeError(
+      "GitHubManager object has no method or property for the authenticated username."
+    )
+
+  def topLevelMenu(self):
+    while True:
+      result = button_dialog(
+        title=self.appName,
+        text="Select a menu:",
+        buttons=[
+          ("GitHub Org & User", "org_user"),
+          ("Exit", "exit")
+        ]
+      ).run()
+      if result == "org_user":
+        self.orgUserMenu()
+      elif result == "exit":
+        logging.info("Exiting application.")
+        break
+
+  def orgUserMenu(self):
+    orgs = self.githubManager.get_user_organizations()
+    user = self._getAuthenticatedUsername()
+    choices = [(org, org) for org in orgs]
+    choices.append((user, user))
+    while True:
+      result = radiolist_dialog(
+        title="GitHub Org & User Menu",
+        text="Select an organization or your username:",
+        values=choices + [("back", "< Back to Top-Level Menu>")]
+      ).run()
+      if result == "back" or result is None:
+        logging.info("Returning to Top-Level menu.")
+        return
+      else:
+        self.repositoryMenu(result)
+
+  def repositoryMenu(self, orgOrUser):
+    repos = self.githubManager.get_repos(orgOrUser)
+    enabledSet = set(
+      (r['org'], r['repo_name'])
+      for r in self.config['enabled_repos']
+    )
+    choices = []
+    for repo in repos:
+      checked = (orgOrUser, repo) in enabledSet
+      choices.append((repo, repo, checked))
+    while True:
+      checkboxValues = [
+        (repo, repo) for repo in repos
+      ] + [("back", "< Back to Org/User Menu>")]
+      result = checkboxlist_dialog(
+        title=f"Repositories for {orgOrUser}",
+        text="Enable/disable repositories:",
+        values=checkboxValues,
+        ok_text="Apply",
+        cancel_text="Back"
+      ).run()
+      if result is None or "back" in result:
+        logging.info("Returning to Org/User menu.")
+        return
+      # Update enabled_repos
+      self.config['enabled_repos'] = [
+        r for r in self.config['enabled_repos']
+        if r['org'] != orgOrUser
+      ]
+      for repo in result:
+        if repo == "back":
+          continue
+        self.config['enabled_repos'].append({'org': orgOrUser, 'repo_name': repo})
+      self.saveConfig()
+      enabledSet = set(
+        (r['org'], r['repo_name'])
+        for r in self.config['enabled_repos']
+      )
+      logging.info(f"Enabled repos for {orgOrUser}: {result}")
+
+if __name__ == '__main__':
+  ui = ConfigUi()
+  ui.run()
