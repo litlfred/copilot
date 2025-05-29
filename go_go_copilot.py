@@ -27,6 +27,19 @@ class GoGoCopilot:
             raise GoGoCopilotError("GitHub CLI (gh) is not installed.")
         if not self._is_gh_copilot_installed():
             raise GoGoCopilotError("GitHub Copilot CLI extension is not installed.")
+        if not self._is_gh_authenticated():
+            raise GoGoCopilotError(
+                "No valid GitHub CLI access token detected.\n\n"
+                "To use GitHub Copilot in the CLI, you must authenticate the GitHub CLI using a personal access token (PAT).\n"
+                "Follow these steps:\n"
+                "1. Visit https://github.com/settings/tokens?type=beta\n"
+                "2. Generate a new fine-grained personal access token with these scopes: 'repo', 'read:org', and 'copilot'.\n"
+                "3. Save the token into a file, e.g. 'token.txt'.\n"
+                "4. Authenticate with the GitHub CLI by running:\n"
+                "     gh auth login --with-token < token.txt\n"
+                "5. After authenticating, re-run this script.\n"
+                "For more info, see: https://cli.github.com/manual/gh_auth_login\n"
+            )
 
     def _is_gh_installed(self) -> bool:
         return shutil.which("gh") is not None
@@ -36,6 +49,18 @@ class GoGoCopilot:
             output = subprocess.check_output(["gh", "extension", "list"], text=True)
             return "copilot" in output
         except Exception:
+            return False
+
+    def _is_gh_authenticated(self) -> bool:
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return "Logged in to github.com" in result.stdout
+        except subprocess.CalledProcessError:
             return False
 
     def suggest_solution(
