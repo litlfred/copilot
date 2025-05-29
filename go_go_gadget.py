@@ -15,276 +15,207 @@ import shutil
 import re
 import json
 import logging
-
-from typing import List
-
 from go_go_git import GoGoGit, GoGoGitError
 from go_go_copilot import GoGoCopilot, GoGoCopilotError
 
+# --- Robust Logging Setup ---
 os.makedirs(".copilot", exist_ok=True)
 LOGPATH = ".copilot/proposals.log"
 logging.basicConfig(
-  level=logging.DEBUG,
-  format="%(asctime)s %(levelname)s %(message)s",
-  handlers=[
-    logging.FileHandler(LOGPATH, mode='a'),
-    logging.StreamHandler(sys.stderr)
-  ]
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        logging.FileHandler(LOGPATH, mode='a'),
+        logging.StreamHandler(sys.stderr)
+    ]
 )
+logging.debug("Starting go_go_gadget.py script.")
 
 COPILOT_PROPOSALS = ".copilot/proposals"
 
+def fatal(msg):
+    logging.error(msg)
+    sys.exit(1)
 
-def fatal(msg: str) -> None:
-  """Log an error and exit the script.
+def menu_select(options, prompt):
+    logging.info(f"Prompting user menu: {prompt} Options: {options}")
+    print(prompt)
+    for i, option in enumerate(options, 1):
+        print(f"{i}. {option}")
+    idx = input("Select option: ")
+    try:
+        idx_int = int(idx)
+        if 1 <= idx_int <= len(options):
+            logging.info(f"User selected option {idx_int}: {options[idx_int-1]}")
+            return options[idx_int - 1]
+    except Exception as e:
+        logging.error(f"Invalid menu selection: {idx} Exception: {str(e)}")
+    fatal("Invalid selection")
 
-  Args:
-      msg (str): Fatal error message.
-  """
-  logging.error(msg)
-  sys.exit(1)
+def gh_list_orgs():
+    logging.debug("Listing GitHub orgs.")
+    try:
+        out = os.popen("gh api user/orgs --jq '.[].login'").read().splitlines()
+        user = os.popen("gh api user --jq .login").read().strip()
+        orgs = [user] + out
+        logging.info(f"Found orgs: {orgs}")
+        return orgs
+    except Exception as e:
+        logging.error(f"Failed to list GitHub organizations: {str(e)}")
+        fatal("Failed to list GitHub organizations.")
 
+def gh_list_repos(org):
+    logging.debug(f"Listing repos for org: {org}")
+    try:
+        out = os.popen(f"gh repo list {org} --json name -L 100 | jq -r '.[].name'").read().splitlines()
+        logging.info(f"Found repos for {org}: {out}")
+        return out
+    except Exception as e:
+        logging.error(f"Failed to list repos for {org}: {str(e)}")
+        fatal(f"Failed to list repos for {org}")
 
-def menu_select(options: List[str], prompt: str) -> str:
-  """Prompt the user to select from a list of options.
+def gh_list_issues(org, repo):
+    logging.debug(f"Listing issues for {org}/{repo}")
+    try:
+        out = os.popen(f"gh issue list -R {org}/{repo} --json number,title -L 100 | jq -c '.[]'").read().splitlines()
+        issues = []
+        for line in out:
+            d = json.loads(line)
+            issues.append(f"{d['number']}: {d['title']}")
+        logging.info(f"Found issues for {org}/{repo}: {issues}")
+        return issues
+    except Exception as e:
+        logging.error(f"Failed to list issues for {org}/{repo}: {str(e)}")
+        fatal(f"Failed to list issues for {org}/{repo}")
 
-  Args:
-      options (List[str]): List of options.
-      prompt (str): Prompt message.
+def gh_check_issue_exists(org, repo, issue_num):
+    logging.debug(f"Checking if issue exists: {org}/{repo}#{issue_num}")
+    code = os.system(f"gh issue view -R {org}/{repo} {issue_num} > /dev/null 2>&1")
+    exists = code == 0
+    logging.info(f"Issue exists: {exists} (exit code {code})")
+    return exists
 
-  Returns:
-      str: Selected option.
-  """
-  logging.info(f"Prompting user menu: {prompt} Options: {options}")
-  print(prompt)
-  for i, option in enumerate(options, 1):
-    print(f"{i}. {option}")
-  idx = input("Select option: ")
-  try:
-    idx_int = int(idx)
-    if 1 <= idx_int <= len(options):
-      logging.info(f"User selected option {idx_int}: {options[idx_int-1]}")
-      return options[idx_int - 1]
-  except Exception as e:
-    logging.error(f"Invalid menu selection: {idx} Exception: {str(e)}")
-  fatal("Invalid selection")
+def empty_dir(dir_path):
+    logging.debug(f"Emptying directory: {dir_path}")
+    if os.path.exists(dir_path):
+        for f in os.listdir(dir_path):
+            fp = os.path.join(dir_path, f)
+            try:
+                if os.path.isdir(fp):
+                    shutil.rmtree(fp)
+                    logging.info(f"Removed directory: {fp}")
+                else:
+                    os.remove(fp)
+                    logging.info(f"Removed file: {fp}")
+            except Exception as e:
+                logging.error(f"Failed to remove {fp}: {str(e)}")
+                raise
 
+def main():
+    logging.info("go_go_gadget.py main function entered.")
+    # Argument parsing
+    arg = None
+    if len(sys.argv) == 2:
+        arg = sys.argv[1]
+        logging.info(f"Argument provided: {arg}")
+        m = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issue/([0-9]+)$", arg)
+        if not m:
+            logging.error("Argument does not match required pattern")
+            fatal("Argument must match the pattern ORG/REPO_NAME/issue/ISSUE_NUM")
+        org, repo_name, issue_num = m.group(1), m.group(2), int(m.group(3))
+        logging.info(f"Parsed org: {org}, repo: {repo_name}, issue: {issue_num}")
+        if not gh_check_issue_exists(org, repo_name, issue_num):
+            fatal(f"Issue {issue_num} does not exist at {org}/{repo_name}.")
+    elif len(sys.argv) == 1:
+        logging.info("No command-line argument provided, using interactive selection.")
+        org = menu_select(gh_list_orgs(), "Select organization/user:")
+        if not os.path.exists(org):
+            os.makedirs(org)
+            logging.info(f"Created directory for org: {org}")
+        repo_name = menu_select(gh_list_repos(org), f"Select repository for {org}:")
+        issue_options = gh_list_issues(org, repo_name)
+        if not issue_options:
+            fatal("No open issues found.")
+        issue_sel = menu_select(issue_options, f"Select issue for {org}/{repo_name}:")
+        issue_num = int(issue_sel.split(":")[0])
+        logging.info(f"Selected org/repo/issue: {org}/{repo_name}#{issue_num}")
+    else:
+        logging.error("Invalid usage, wrong number of arguments.")
+        fatal("Usage: go_go_gadget.py [ORG/REPO_NAME/issue/ISSUE_NUM]")
 
-def gh_list_orgs() -> List[str]:
-  """List GitHub organizations and the authenticated user.
-
-  Returns:
-      List[str]: List of organizations and user.
-  """
-  logging.debug("Listing GitHub orgs.")
-  try:
-    out = os.popen("gh api user/orgs --jq '.[].login'").read().splitlines()
-    user = os.popen("gh api user --jq .login").read().strip()
-    orgs = [user] + out
-    logging.info(f"Found orgs: {orgs}")
-    return orgs
-  except Exception as e:
-    logging.error(f"Failed to list GitHub organizations: {str(e)}")
-    fatal("Failed to list GitHub organizations.")
-
-
-def gh_list_repos(org: str) -> List[str]:
-  """List repositories for a given org or user.
-
-  Args:
-      org (str): Org or user name.
-
-  Returns:
-      List[str]: List of repository names.
-  """
-  logging.debug(f"Listing repos for org: {org}")
-  try:
-    out = os.popen(
-      f"gh repo list {org} --json name -L 100 | jq -r '.[].name'"
-    ).read().splitlines()
-    logging.info(f"Found repos for {org}: {out}")
-    return out
-  except Exception as e:
-    logging.error(f"Failed to list repos for {org}: {str(e)}")
-    fatal(f"Failed to list repos for {org}")
-
-
-def gh_list_issues(org: str, repo: str) -> List[str]:
-  """List issues for a given repo.
-
-  Args:
-      org (str): Org name.
-      repo (str): Repo name.
-
-  Returns:
-      List[str]: List of issue descriptions.
-  """
-  logging.debug(f"Listing issues for {org}/{repo}")
-  try:
-    out = os.popen(
-      f"gh issue list -R {org}/{repo} --json number,title -L 100 | jq -c '.[]'"
-    ).read().splitlines()
-    issues = []
-    for line in out:
-      d = json.loads(line)
-      issues.append(f"{d['number']}: {d['title']}")
-    logging.info(f"Found issues for {org}/{repo}: {issues}")
-    return issues
-  except Exception as e:
-    logging.error(f"Failed to list issues for {org}/{repo}: {str(e)}")
-    fatal(f"Failed to list issues for {org}/{repo}")
-
-
-def gh_check_issue_exists(org: str, repo: str, issue_num: int) -> bool:
-  """Check if a specific issue exists in the repo.
-
-  Args:
-      org (str): Org name.
-      repo (str): Repo name.
-      issue_num (int): Issue number.
-
-  Returns:
-      bool: True if issue exists.
-  """
-  logging.debug(f"Checking if issue exists: {org}/{repo}#{issue_num}")
-  code = os.system(
-    f"gh issue view -R {org}/{repo} {issue_num} > /dev/null 2>&1"
-  )
-  exists = code == 0
-  logging.info(f"Issue exists: {exists} (exit code {code})")
-  return exists
-
-
-def empty_dir(dir_path: str) -> None:
-  """Remove all files and directories inside the specified directory.
-
-  Args:
-      dir_path (str): Directory to empty.
-  """
-  logging.debug(f"Emptying directory: {dir_path}")
-  if os.path.exists(dir_path):
-    for f in os.listdir(dir_path):
-      fp = os.path.join(dir_path, f)
-      try:
-        if os.path.isdir(fp):
-          shutil.rmtree(fp)
-          logging.info(f"Removed directory: {fp}")
-        else:
-          os.remove(fp)
-          logging.info(f"Removed file: {fp}")
-      except Exception as e:
-        logging.error(f"Failed to remove {fp}: {str(e)}")
-        raise
-
-
-def main() -> None:
-  """Main function for go_go_gadget.py."""
-  logging.info("go_go_gadget.py main function entered.")
-  arg = None
-  if len(sys.argv) == 2:
-    arg = sys.argv[1]
-    logging.info(f"Argument provided: {arg}")
-    m = re.match(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issue/([0-9]+)$", arg)
-    if not m:
-      logging.error("Argument does not match required pattern")
-      fatal("Argument must match the pattern ORG/REPO_NAME/issue/ISSUE_NUM")
-    org, repo_name, issue_num = m.group(1), m.group(2), int(m.group(3))
-    logging.info(f"Parsed org: {org}, repo: {repo_name}, issue: {issue_num}")
-    if not gh_check_issue_exists(org, repo_name, issue_num):
-      fatal(f"Issue {issue_num} does not exist at {org}/{repo_name}.")
-  elif len(sys.argv) == 1:
-    logging.info("No command-line argument provided, using interactive selection.")
-    org = menu_select(gh_list_orgs(), "Select organization/user:")
-    if not os.path.exists(org):
-      os.makedirs(org)
-      logging.info(f"Created directory for org: {org}")
-    repo_name = menu_select(gh_list_repos(org), f"Select repository for {org}:")
-    issue_options = gh_list_issues(org, repo_name)
-    if not issue_options:
-      fatal("No open issues found.")
-    issue_sel = menu_select(issue_options, f"Select issue for {org}/{repo_name}:")
-    issue_num = int(issue_sel.split(":")[0])
-    logging.info(f"Selected org/repo/issue: {org}/{repo_name}#{issue_num}")
-  else:
-    logging.error("Invalid usage, wrong number of arguments.")
-    fatal("Usage: go_go_gadget.py [ORG/REPO_NAME/issue/ISSUE_NUM]")
-
-  base_dir = os.getcwd()
-  logging.info(
-    f"Ensuring repo is cloned and clean: org={org} repo={repo_name} base_dir={base_dir}"
-  )
-  repo_path = GoGoGit.ensure_cloned(org, repo_name, base_dir)
-  git = GoGoGit(repo_path)
-  if not git.is_clean():
-    logging.error(f"Repository {repo_path} is not clean.")
-    fatal(f"Repository {repo_path} is not clean. Please commit or stash changes.")
-
-  branch_name = f"copilot-proposed-fixes-for-issue-{issue_num}"
-  logging.info(f"Preparing branch: {branch_name}")
-  if git.branch_exists(branch_name):
-    git._run_git(["checkout", branch_name])
+    base_dir = os.getcwd()
+    logging.info(f"Ensuring repo is cloned and clean: org={org} repo={repo_name} base_dir={base_dir}")
+    repo_path = GoGoGit.ensure_cloned(org, repo_name, base_dir)
+    git = GoGoGit(repo_path)
     if not git.is_clean():
-      logging.error(f"Branch {branch_name} is not clean.")
-      fatal(f"Branch {branch_name} is not clean. Please commit or stash changes.")
-  else:
-    git.switch_or_create_branch(branch_name, push=True)
+        logging.error(f"Repository {repo_path} is not clean.")
+        fatal(f"Repository {repo_path} is not clean. Please commit or stash changes.")
 
-  proposal_dir = os.path.join(COPILOT_PROPOSALS, org, repo_name, str(issue_num))
-  logging.info(f"Preparing proposals dir: {proposal_dir}")
-  if os.path.exists(proposal_dir):
-    empty_dir(proposal_dir)
-  else:
-    os.makedirs(proposal_dir, exist_ok=True)
-    logging.info(f"Created proposals dir: {proposal_dir}")
+    branch_name = f"copilot-proposed-fixes-for-issue-{issue_num}"
+    logging.info(f"Preparing branch: {branch_name}")
+    if git.branch_exists(branch_name):
+        git._run_git(["checkout", branch_name])
+        if not git.is_clean():
+            logging.error(f"Branch {branch_name} is not clean.")
+            fatal(f"Branch {branch_name} is not clean. Please commit or stash changes.")
+    else:
+        git.switch_or_create_branch(branch_name, push=True)
 
-  try:
-    copilot = GoGoCopilot()
-    logging.info(f"Querying Copilot for {org}/{repo_name}#{issue_num}")
-    result = copilot.suggest_solution(org, repo_name, issue_num)
-    logging.info("Received result from Copilot")
-  except GoGoCopilotError as e:
-    logging.error(f"GoGoCopilotError: {str(e)}")
-    fatal(str(e))
+    proposal_dir = os.path.join(COPILOT_PROPOSALS, org, repo_name, str(issue_num))
+    logging.info(f"Preparing proposals dir: {proposal_dir}")
+    if os.path.exists(proposal_dir):
+        empty_dir(proposal_dir)
+    else:
+        os.makedirs(proposal_dir, exist_ok=True)
+        logging.info(f"Created proposals dir: {proposal_dir}")
 
-  for fname, content in result["files"].items():
-    target = os.path.join(proposal_dir, fname)
-    tdir = os.path.dirname(target)
-    if not os.path.exists(tdir):
-      os.makedirs(tdir, exist_ok=True)
-      logging.debug(f"Created directory for file {tdir}")
-    with open(target, "w") as f:
-      f.write(content)
-      logging.info(f"Wrote file to proposal dir: {target}")
-    repo_target = os.path.join(repo_path, fname)
-    shutil.copyfile(target, repo_target)
-    logging.info(f"Copied {target} to repo: {repo_target}")
+    try:
+        copilot = GoGoCopilot()
+        logging.info(f"Querying Copilot for {org}/{repo_name}#{issue_num}")
+        result = copilot.suggest_solution(org, repo_name, issue_num)
+        logging.info("Received result from Copilot")
+    except GoGoCopilotError as e:
+        logging.error(f"GoGoCopilotError: {str(e)}")
+        fatal(str(e))
 
-  print(f"Files written to {proposal_dir}. Please review them before continuing.")
-  logging.info(f"Files written to {proposal_dir}. Awaiting user confirmation.")
-  input("Press Enter to continue...")
+    for fname, content in result["files"].items():
+        target = os.path.join(proposal_dir, fname)
+        tdir = os.path.dirname(target)
+        if not os.path.exists(tdir):
+            os.makedirs(tdir, exist_ok=True)
+            logging.debug(f"Created directory for file {tdir}")
+        with open(target, "w") as f:
+            f.write(content)
+            logging.info(f"Wrote file to proposal dir: {target}")
+        repo_target = os.path.join(repo_path, fname)
+        shutil.copyfile(target, repo_target)
+        logging.info(f"Copied {target} to repo: {repo_target}")
 
-  files_to_add = [fname for fname in result["files"].keys()]
-  logging.info(f"Staging and committing files: {files_to_add}")
-  git.add_commit_push(
-    files=files_to_add,
-    message=(
-      f"Github Copilot proposed changes for issue #{issue_num}\n"
-      f"https://github.com/{org}/{repo_name}/issues/{issue_num}\n"
-      f"\nExplanation (from Copilot):\n{result['explanation']}\n"
-      f"\nGenerated by go_go_gadget.py (Copilot, OpenAI, GitHub Copilot, thanks to all OSS authors whose software and docs contributed to this work.)"
-    ),
-    push=True,
-  )
-  logging.info("Proposed changes committed and pushed to remote.")
+    print(f"Files written to {proposal_dir}. Please review them before continuing.")
+    logging.info(f"Files written to {proposal_dir}. Awaiting user confirmation.")
+    input("Press Enter to continue...")
 
-  print("Proposed changes committed and pushed to remote.")
-  print("Returning to issue selection menu.")
-  logging.info("Returning to issue selection menu.")
+    files_to_add = [fname for fname in result["files"].keys()]
+    logging.info(f"Staging and committing files: {files_to_add}")
+    git.add_commit_push(
+        files=files_to_add,
+        message=(
+            f"Github Copilot proposed changes for issue #{issue_num}\n"
+            f"https://github.com/{org}/{repo_name}/issues/{issue_num}\n"
+            f"\nExplanation (from Copilot):\n{result['explanation']}\n"
+            f"\nGenerated by go_go_gadget.py (Copilot, OpenAI, GitHub Copilot, thanks to all OSS authors whose software and docs contributed to this work.)"
+        ),
+        push=True,
+    )
+    logging.info("Proposed changes committed and pushed to remote.")
 
+    print("Proposed changes committed and pushed to remote.")
+    print("Returning to issue selection menu.")
+    logging.info("Returning to issue selection menu.")
 
 if __name__ == "__main__":
-  try:
-    main()
-  except Exception as e:
-    logging.critical(f"Uncaught exception: {str(e)}", exc_info=True)
-    fatal(str(e))
+    try:
+        main()
+    except Exception as e:
+        logging.critical(f"Uncaught exception: {str(e)}", exc_info=True)
+        fatal(str(e))

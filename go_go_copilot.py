@@ -1,57 +1,92 @@
 """
 go_go_copilot.py
 
-Refactored: integrates Copilot with config_ui.py menus and go_go_git.py for repo and gh checks.
-All gh/git/Copilot CLI checks now use GoGoGit.
+Author: Copilot (GitHub Copilot, OpenAI, and contributors)
+Attribution: Generated with the help of GitHub Copilot and OpenAI's GPT models.
+Thanks to the authors of the GitHub CLI and related open-source tools.
+
+An object-oriented, importable Python module for interacting with GitHub Copilot via the `gh` CLI.
 """
 
 import subprocess
 import logging
+import shutil
 import re
-import os
-from typing import Dict, Optional
-from config_ui import ConfigUi
-from go_go_git import GoGoGit, GoGoGitError
+from typing import Dict, List, Optional, Tuple
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
 
 class GoGoCopilotError(Exception):
     pass
 
+
 class GoGoCopilot:
     def __init__(self):
-        # Delegate all checks to GoGoGit
-        GoGoGit.assert_gh_ready()
+        if not self._is_gh_installed():
+            raise GoGoCopilotError("GitHub CLI (gh) is not installed.")
+        if not self._is_gh_copilot_installed():
+            raise GoGoCopilotError("GitHub Copilot CLI extension is not installed.")
+        if not self._is_gh_authenticated():
+            raise GoGoCopilotError(
+                "No valid GitHub CLI access token detected.\n\n"
+                "To use GitHub Copilot in the CLI, you must authenticate the GitHub CLI using a personal access token (PAT).\n"
+                "Follow these steps:\n"
+                "1. Visit https://github.com/settings/tokens?type=beta\n"
+                "2. Generate a new fine-grained personal access token with these scopes: 'repo', 'read:org', and 'copilot'.\n"
+                "3. Save the token into a file, e.g. 'token.txt'.\n"
+                "4. Authenticate with the GitHub CLI by running:\n"
+                "     gh auth login --with-token < token.txt\n"
+                "5. After authenticating, re-run this script.\n"
+                "For more info, see: https://cli.github.com/manual/gh_auth_login\n"
+            )
+
+    def _is_gh_installed(self) -> bool:
+        return shutil.which("gh") is not None
+
+    def _is_gh_copilot_installed(self) -> bool:
+        try:
+            output = subprocess.check_output(["gh", "extension", "list"], text=True)
+            return "copilot" in output
+        except Exception:
+            return False
+
+    def _is_gh_authenticated(self) -> bool:
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return "Logged in to github.com" in result.stdout
+        except subprocess.CalledProcessError:
+            return False
 
     def suggest_solution(
-        self, org: str, repo_name: str, issue_num: int, repo_base_dir: Optional[str] = None
+        self, org: str, repo_name: str, issue_num: int
     ) -> Dict[str, object]:
         """
         Asks GitHub Copilot to suggest a solution for a GitHub issue.
-        Ensures repo is cloned using GoGoGit before invoking Copilot.
+        Returns a dict with keys 'explanation' and 'files'.
+        Uses stdin to pass the prompt to `gh copilot suggest` due to known CLI limitations.
         """
-        # Ensure repo is present locally
-        if repo_base_dir is not None:
-            repo_path = GoGoGit.ensure_cloned(org, repo_name, repo_base_dir)
-        else:
-            repo_path = os.getcwd()
-        logging.info(f"Working in repo path: {repo_path}")
-
         prompt = (
             f"Please review the issue at @{org}/{repo_name}/issue/{issue_num} including all of the comments. "
-            f"Examine the contents of branch copilot-proposed-fixes-for-issue-{issue_num} of the repo at {org}/{repo_name} if it exists, "
+            f"Examine the contents of branch copilot-proposed-fixes-for-issue-{issue_num} of the repo at {org}/{repo_name} exists, "
             "and use it as a basis for a proposed or modified solution to the issue. "
             "The proposed solution should include an EXPLANATION of the approach and any files needed to implement the proposed solution."
         )
         logging.info(f"Requesting solution from Copilot for {org}/{repo_name} issue #{issue_num}")
         try:
+            # Pass prompt via stdin, capture output as plain text (markdown)
             result = subprocess.check_output(
                 ["gh", "copilot", "suggest"],
                 input=prompt,
                 text=True,
                 stderr=subprocess.STDOUT,
-                cwd=repo_path,
             )
+            # Parse output for explanation and files (expect markdown with code blocks)
             explanation, files = self._parse_copilot_output(result)
             return {"explanation": explanation, "files": files}
         except subprocess.CalledProcessError as e:
@@ -98,86 +133,70 @@ class GoGoCopilot:
             explanation = output.strip()
         return explanation, files
 
-class CopilotMenu(ConfigUi):
-    def __init__(self, configFilePath='config.json', appName='CopilotConfigUI'):
-        super().__init__(configFilePath, appName)
-        self.copilot = GoGoCopilot()
-
-    def topLevelMenu(self):
-        while True:
-            result = self._button_dialog(
-                title=self.appName,
-                text="Select a menu:",
-                buttons=[
-                    ("GitHub Org & User", "org_user"),
-                    ("Copilot", "copilot"),
-                    ("Exit", "exit"),
-                ]
-            )
-            if result == "org_user":
-                self.orgUserMenu()
-            elif result == "copilot":
-                self.copilotMenu()
-            elif result == "exit":
-                logging.info("Exiting application.")
-                break
-
-    def copilotMenu(self):
-        orgs = self.githubManager.get_user_organizations()
-        user = self._getAuthenticatedUsername()
-        choices = [(org, org) for org in orgs]
-        choices.append((user, user))
-        orgOrUser = self._radiolist_dialog(
-            title="Copilot - Org/User",
-            text="Select an organization or your username:",
-            values=choices
-        )
-        if not orgOrUser:
-            return
-        repos = self.githubManager.get_repos(orgOrUser)
-        repo = self._radiolist_dialog(
-            title="Copilot - Repo",
-            text="Select a repository:",
-            values=[(r, r) for r in repos]
-        )
-        if not repo:
-            return
-        issue_num = self._input_dialog(
-            title="Copilot - Issue Number",
-            text="Enter the GitHub issue number to solve:"
-        )
-        if not issue_num or not issue_num.isdigit():
-            logging.warning("Invalid issue number.")
-            return
-        issue_num = int(issue_num)
-        repo_base_dir = os.path.expanduser("~/copilot_repos")
+    def get_open_issues(self, org: str, repo_name: str) -> List[Tuple[int, str]]:
+        """
+        Fetch all open issues for the specified repository using gh CLI.
+        Returns a list of tuples: (issue_number, issue_title)
+        """
         try:
-            result = self.copilot.suggest_solution(orgOrUser, repo, issue_num, repo_base_dir)
-            self._display_solution(result)
+            # Use the GitHub CLI to list issues, outputting number and title
+            result = subprocess.check_output(
+                [
+                    "gh", "issue", "list",
+                    "--repo", f"{org}/{repo_name}",
+                    "--state", "open",
+                    "--json", "number,title"
+                ],
+                text=True,
+            )
+            import json
+            issues = json.loads(result)
+            return [(issue["number"], issue["title"]) for issue in issues]
         except Exception as e:
-            logging.error(f"Error running Copilot: {e}")
+            raise GoGoCopilotError(f"Failed to fetch issues: {e}")
 
-    # Dialog wrappers to allow easier testing (prompt_toolkit dialogs)
-    def _button_dialog(self, title, text, buttons):
-        from prompt_toolkit.shortcuts import button_dialog
-        return button_dialog(title=title, text=text, buttons=buttons).run()
+    def select_issue_ui(self, org: str, repo_name: str) -> Optional[int]:
+        """
+        Presents a selection menu for all open issues in the repo.
+        Returns the selected issue number, or None if cancelled.
+        """
+        issues = self.get_open_issues(org, repo_name)
+        if not issues:
+            logging.info("No open issues found.")
+            return None
+        print("\nSelect an issue:")
+        for idx, (num, title) in enumerate(issues, start=1):
+            print(f"{idx}. #{num}: {title}")
+        while True:
+            choice = input(f"\nEnter number (1-{len(issues)}) or 'q' to quit: ").strip()
+            if choice.lower() == 'q':
+                return None
+            if choice.isdigit() and 1 <= int(choice) <= len(issues):
+                return issues[int(choice)-1][0]
+            print("Invalid selection. Try again.")
 
-    def _radiolist_dialog(self, title, text, values):
-        from prompt_toolkit.shortcuts import radiolist_dialog
-        return radiolist_dialog(title=title, text=text, values=values).run()
-
-    def _input_dialog(self, title, text):
-        from prompt_toolkit.shortcuts import input_dialog
-        return input_dialog(title=title, text=text).run()
-
-    def _display_solution(self, result: dict):
-        explanation = result.get("explanation", "")
-        files = result.get("files", {})
-        print("\n==== Copilot Solution ====")
-        print(explanation)
-        for fn, code in files.items():
-            print(f"\n--- {fn} ---\n{code}\n")
-
-if __name__ == "__main__":
-    ui = CopilotMenu()
-    ui.run()
+    def run_issue_solution_flow(self, org: str, repo_name: str):
+        """
+        High-level flow:
+        1. Fetch issues for repo.
+        2. Prompt user to select one.
+        3. Request Copilot to suggest a solution for the selected issue.
+        4. Display Copilot's explanation and proposed files.
+        """
+        issue_num = self.select_issue_ui(org, repo_name)
+        if issue_num is None:
+            print("No issue selected. Exiting.")
+            return
+        print(f"\nRequesting Copilot suggestion for issue #{issue_num}...\n")
+        try:
+            result = self.suggest_solution(org, repo_name, issue_num)
+            print("\n--- Copilot Explanation ---\n")
+            print(result["explanation"])
+            if result["files"]:
+                print("\n--- Copilot Proposed Files ---\n")
+                for fname, fcontent in result["files"].items():
+                    print(f"\nFile: {fname}\n{'-'*len(fname)}\n{fcontent}\n")
+            else:
+                print("\n(No files proposed.)\n")
+        except GoGoCopilotError as e:
+            print(f"Error: {e}")
