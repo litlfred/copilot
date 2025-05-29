@@ -1,6 +1,10 @@
 import json
 import os
+
 import logging
+
+from typing import Optional, Dict, Any, List
+
 from github_manager import GitHubManager
 
 try:
@@ -10,15 +14,29 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 
+
 class ConfigUi:
-  def __init__(self, configFilePath='config.json', appName='CopilotConfigUI'):
+  """Configuration UI for managing enabled repositories."""
+
+  def __init__(self, configFilePath: str = 'config.json', appName: str = 'CopilotConfigUI') -> None:
+    """Initialize ConfigUi.
+
+    Args:
+        configFilePath (str): Path to the config file.
+        appName (str): Application name.
+    """
     self.configFilePath = configFilePath
     self.appName = appName
     self.githubManager = GitHubManager()
     self.config = self.loadConfig()
     logging.info(f"Initialized {self.appName} with config file: {self.configFilePath}")
 
-  def loadConfig(self):
+  def loadConfig(self) -> Dict[str, Any]:
+    """Load configuration from file or create default config.
+
+    Returns:
+        dict: Configuration dictionary.
+    """
     if not os.path.exists(self.configFilePath):
       logging.info(f"Config file {self.configFilePath} not found. Creating default config.")
       config = {'enabled_repos': []}
@@ -30,17 +48,30 @@ class ConfigUi:
         config['enabled_repos'] = []
     return config
 
-  def saveConfig(self, config=None):
+  def saveConfig(self, config: Optional[Dict[str, Any]] = None) -> None:
+    """Save configuration to file.
+
+    Args:
+        config (dict, optional): Configuration to save. Defaults to self.config.
+    """
     config = config or self.config
     with open(self.configFilePath, 'w') as f:
       json.dump(config, f, indent=2)
     logging.info(f"Saved configuration to {self.configFilePath}")
 
-  def run(self):
+  def run(self) -> None:
+    """Run the top-level menu."""
     self.topLevelMenu()
 
-  def _getAuthenticatedUsername(self):
-    # Try several common patterns for username retrieval
+  def _getAuthenticatedUsername(self) -> str:
+    """Get the authenticated GitHub username.
+
+    Returns:
+        str: Authenticated username.
+
+    Raises:
+        AttributeError: If username method/property not found.
+    """
     if hasattr(self.githubManager, 'get_authenticated_username'):
       return self.githubManager.get_authenticated_username()
     if hasattr(self.githubManager, 'get_username'):
@@ -57,7 +88,8 @@ class ConfigUi:
       "GitHubManager object has no method or property for the authenticated username."
     )
 
-  def topLevelMenu(self):
+  def topLevelMenu(self) -> None:
+    """Display the top-level menu."""
     while True:
       result = button_dialog(
         title=self.appName,
@@ -73,10 +105,11 @@ class ConfigUi:
         logging.info("Exiting application.")
         break
 
-  def orgUserMenu(self):
+  def orgUserMenu(self) -> None:
+    """Display the organization/user selection menu."""
     orgs = self.githubManager.get_user_organizations()
     user = self._getAuthenticatedUsername()
-    choices = [(org, org) for org in orgs]
+    choices: List[tuple] = [(org, org) for org in orgs]
     choices.append((user, user))
     while True:
       result = radiolist_dialog(
@@ -90,16 +123,14 @@ class ConfigUi:
       else:
         self.repositoryMenu(result)
 
-  def repositoryMenu(self, orgOrUser):
+  def repositoryMenu(self, orgOrUser: str) -> None:
+    """Display the repository enable/disable menu for a selected org/user.
+
+    Args:
+        orgOrUser (str): Organization or user name.
+    """
     repos = self.githubManager.get_repos(orgOrUser)
-    enabledSet = set(
-      (r['org'], r['repo_name'])
-      for r in self.config['enabled_repos']
-    )
-    choices = []
-    for repo in repos:
-      checked = (orgOrUser, repo) in enabledSet
-      choices.append((repo, repo, checked))
+    enabledSet = {(r['org'], r['repo_name']) for r in self.config['enabled_repos']}
     while True:
       choices = [(repo, repo) for repo in repos]
       defaultValues = [repo for repo in repos if (orgOrUser, repo) in enabledSet]
@@ -114,7 +145,6 @@ class ConfigUi:
       if result is None or "back" in result:
         logging.info("Returning to Org/User menu.")
         return
-      #Update enabled_repos for this org/user—remove old, add new
       self.config['enabled_repos'] = [
         r for r in self.config['enabled_repos']
         if r['org'] != orgOrUser
@@ -124,13 +154,9 @@ class ConfigUi:
           self.config['enabled_repos'].append({'org': orgOrUser, 'repo_name': repo})
           logging.info(f"Enabled repo {repo} for {orgOrUser}")
       self.saveConfig()
-      #Refresh enabledSet for next loop iteration
-      enabledSet = set(
-        (r['org'], r['repo_name'])
-        for r in self.config['enabled_repos']
-      )
-      
-  
+      enabledSet = {(r['org'], r['repo_name']) for r in self.config['enabled_repos']}
+
+
 if __name__ == '__main__':
   ui = ConfigUi()
   ui.run()
