@@ -28,7 +28,7 @@ jobs:
       - name: Generate API docs
         run: |
           mkdir -p docs-out
-          pdoc --html --output-dir docs-out .
+          pdoc -o docs-out .
 
       - name: Deploy to gh-pages (pdoc directory)
         uses: JamesIves/github-pages-deploy-action@v4
