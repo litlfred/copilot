@@ -41,15 +41,23 @@ jobs:
       - name: Check pdoc version (final)
         run: pdoc --version
 
-      - name: Generate API docs for all .py scripts (preserve names/dirs)
+      - name: Generate API docs for all .py scripts (preserve names/dirs, tolerate failures)
         run: |
           mkdir -p docs-out
+          FAILED=""
           find . -type f -name "*.py" ! -path "*/.*/*" ! -name ".*" | while read file; do
             relpath="${file#./}"
             outdir="docs-out/$(dirname "$relpath")"
             mkdir -p "$outdir"
-            pdoc --force -o "$outdir" "$file"
+            if ! pdoc --force -o "$outdir" "$file"; then
+              echo "pdoc failed for $file"
+              FAILED="$FAILED $file"
+            fi
           done
+          if [ -n "$FAILED" ]; then
+            echo "The following files failed to generate documentation:"
+            echo "$FAILED"
+          fi
 
       - name: Deploy to gh-pages (pdoc directory)
         uses: JamesIves/github-pages-deploy-action@v4
