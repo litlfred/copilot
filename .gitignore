@@ -1,0 +1,24 @@
+# Ignore common backup files
+*~
+*.bak
+*.swp
+*.swo
+*.tmp
+*.temp
+*.old
+*.backup
+
+# Ignore Emacs backup files
+*#
+.#*
+
+# Ignore Python bytecode and cache directories
+__pycache__/
+*.py[cod]
+
+# Ignore Copilot-specific directory
+.copilot/
+
+# Ignore configuration and archive files
+config.json
+files.zip
