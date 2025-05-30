@@ -25,19 +25,15 @@ jobs:
       - name: Install pdoc
         run: pip install pdoc
 
-      - name: Generate API docs for all modules recursively
+      - name: Generate API docs for all .py scripts (preserve names/dirs)
         run: |
           mkdir -p docs-out
-          # Find all .py files, excluding hidden dirs/files, make them module names
-          MODULES=$(find . -type f -name "*.py" ! -path "*/.*/*" ! -name ".*" | \
-            sed 's|^\./||' | sed 's|/|.|g' | sed 's|\.py$||')
-          echo "Detected modules:"
-          echo "$MODULES"
-          if [ -n "$MODULES" ]; then
-            pdoc -o docs-out $MODULES
-          else
-            echo "No Python modules found."
-          fi
+          find . -type f -name "*.py" ! -path "*/.*/*" ! -name ".*" | while read file; do
+            relpath="${file#./}"
+            outdir="docs-out/$(dirname "$relpath")"
+            mkdir -p "$outdir"
+            pdoc --force -o "$outdir" "$file"
+          done
 
       - name: Deploy to gh-pages (pdoc directory)
         uses: JamesIves/github-pages-deploy-action@v4
