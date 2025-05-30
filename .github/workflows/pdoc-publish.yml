@@ -22,8 +22,24 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install pdoc v14+ (pre-release)
-        run: pip install --pre pdoc
+      - name: Install pdoc from PyPI
+        run: pip install pdoc
+
+      - name: Check for --force support in pdoc
+        id: pdoc-force-check
+        run: |
+          set +e
+          pdoc --help | grep -- --force
+          RESULT=$?
+          echo "pdoc_force_supported=$RESULT" >> $GITHUB_OUTPUT
+          set -e
+
+      - name: Install pdoc from GitHub if --force is not available
+        if: steps.pdoc-force-check.outputs.pdoc_force_supported != '0'
+        run: pip install git+https://github.com/pdoc3/pdoc.git
+
+      - name: Check pdoc version (final)
+        run: pdoc --version
 
       - name: Generate API docs for all .py scripts (preserve names/dirs)
         run: |
