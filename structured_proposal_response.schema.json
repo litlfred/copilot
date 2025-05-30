@@ -1,48 +1,45 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "StructuredProposalResponse",
+  "description": "A JSON-LD object representing a Structured Proposal Response for code automation. Contains a git patch, explanatory text, errors, install instructions, tool attribution, and a commit message, with all fields following the repository's specification for automated code proposals.",
   "type": "object",
-  "@context": {
-    "version": "https://schema.org/version",
-    "patch": "https://schema.org/text",
-    "explanation": "https://schema.org/description",
-    "errors": "https://schema.org/error",
-    "install": "https://schema.org/instructions",
-    "gadget": "https://schema.org/SoftwareApplication",
-    "commit_message": "https://schema.org/description"
-  },
   "properties": {
+    "@context": {
+      "type": "string",
+      "description": "The JSON-LD context URI, typically 'https://schema.org'. Required for Linked Data compliance.",
+      "default": "https://schema.org"
+    },
     "version": {
       "type": "string",
-      "description": "Version of the Structured Response specification that the response message adheres to, using SEMVER.",
+      "description": "Version of the Structured Proposal Response format, following SEMVER. Default is 'v0.1'.",
       "default": "v0.1"
     },
     "patch": {
       "type": "string",
-      "description": "A string which can be applied as a git patch."
+      "description": "A required string containing a git patch that can be applied to the codebase. Must be in standard patch/diff format."
     },
     "explanation": {
       "type": "string",
-      "description": "Optional explanation of the proposed solution as markdown text."
+      "description": "Optional markdown-formatted text explaining the reasoning or steps behind the proposed patch."
     },
     "errors": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "Optional array of errors or warnings that prevented fully fulfilling the request."
+      "description": "Optional array of error or warning messages explaining what prevented fully fulfilling the request.",
+      "items": { "type": "string" }
     },
     "install": {
-      "type": "string",
-      "description": "Optional set of instructions that the user needs to take before or after installing the files."
+      "type": "array",
+      "description": "Optional array of instructions for the user to perform before or after installing the patch (e.g., move/delete files).",
+      "items": { "type": "string" }
     },
     "gadget": {
       "type": "string",
-      "description": "The LLM/service that was used to respond to the user request."
+      "description": "A required string identifying the LLM/service/tool that generated this response. Should be as specific as possible (e.g., 'OpenAI GPT-4 via GitHub Copilot')."
     },
     "commit_message": {
       "type": "string",
-      "description": "A proposed git commit message summarizing the proposed change."
+      "description": "A required string for the proposed git commit message. Must indicate if it fixes any issues, attribute the tool and contributors, and thank the open source community."
     }
   },
-  "required": ["patch", "gadget", "commit_message"],
-  "additionalProperties": true
+  "required": [ "@context", "patch", "gadget", "commit_message" ]
 }
