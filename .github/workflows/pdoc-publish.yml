@@ -22,8 +22,8 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install pdoc
-        run: pip install pdoc
+      - name: Install pdoc v14+ (pre-release)
+        run: pip install --pre pdoc
 
       - name: Generate API docs for all .py scripts (preserve names/dirs)
         run: |
