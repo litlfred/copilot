@@ -1,58 +1,93 @@
-import subprocess
 import logging
-import shutil
-import re
 import os
-from typing import Dict
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+import subprocess
+from gogo_git import GoGoGit
+from gogo_structuredproposalresponse import StructuredProposalResponse, StructuredProposalResponseError
 
 class GoGoCopilotError(Exception):
     pass
 
 class GoGoCopilot:
-    # ... other methods unchanged ...
+    def __init__(self, preamble_path="prompts/preamble.md", postamble_path="prompts/postamble.md"):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.info("Initializing GoGoCopilot instance.")
+        self._check_gh_and_copilot()
+        self.preamble = self._load_file(preamble_path)
+        self.postamble = self._load_file(postamble_path)
 
-    def suggest_solution(
-        self, org: str, repo_name: str, issue_num: int
-    ) -> Dict[str, object]:
-        """
-        Requests a Copilot suggestion for a GitHub issue, fully non-interactive.
-        """
-        prompt = (
-            f"Please review the issue at @{org}/{repo_name}/issue/{issue_num} including all of the comments. "
-            f"Examine the contents of branch copilot-proposed-fixes-for-issue-{issue_num} of the repo at {org}/{repo_name} exists, "
-            "and use it as a basis for a proposed or modified solution to the issue. "
-            "The proposed solution should include an EXPLANATION of the approach and any files needed to implement the proposed solution."
-        )
-        logging.info(f"Requesting solution from Copilot for {org}/{repo_name} issue #{issue_num}")
+    def _check_gh_and_copilot(self):
+        self.logger.debug("Checking for gh CLI installation.")
+        result = subprocess.run(["gh", "--version"], capture_output=True)
+        if result.returncode != 0:
+            self.logger.error("gh CLI not found.")
+            raise GoGoCopilotError("gh CLI is not installed.")
+        self.logger.info("gh CLI is installed.")
+        self.logger.debug("Checking for gh copilot extension.")
+        result = subprocess.run(["gh", "extension", "list"], capture_output=True, text=True)
+        if "copilot" not in result.stdout:
+            self.logger.error("gh copilot extension not installed.")
+            raise GoGoCopilotError("gh copilot extension is not installed.")
+        self.logger.info("gh copilot extension is installed.")
 
-        env = os.environ.copy()
-        env["GH_COPILOT_NO_USAGE_STATS_PROMPT"] = "1"
-        env["GH_COPILOT_INTERACTIVE"] = "false"
+    def _load_file(self, path):
+        self.logger.debug(f"Loading file at path: {path}")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                content = f.read()
+            self.logger.info(f"Loaded file: {path}")
+            return content
+        self.logger.warning(f"File not found: {path}. Using empty string.")
+        return ""
 
-        # Pass --type code so CLI does not prompt for a mode
-        command = [
-            "gh", "copilot", "suggest",
-            "--type", "code",  # or "explain", "test", or your desired mode
-            "--no-interactive",  # if your gh copilot version supports it
-        ]
+    def get_preamble(self):
+        self.logger.debug("Getting preamble string.")
+        return self.preamble
 
+    def set_preamble(self, text):
+        self.logger.info("Setting new preamble string.")
+        self.preamble = text
+
+    def get_postamble(self):
+        self.logger.debug("Getting postamble string.")
+        return self.postamble
+
+    def set_postamble(self, text):
+        self.logger.info("Setting new postamble string.")
+        self.postamble = text
+
+    def suggest_solution(self, org, repo, issue_num):
+        prompt = f"{self.preamble}\nPlease solve {org}/{repo}/issue/{issue_num}\n{self.postamble}"
+        self.logger.info(f"Invoking Copilot for solution: org={org}, repo={repo}, issue={issue_num}")
+        self.logger.debug(f"Prompt sent to Copilot:\n{prompt}")
         try:
-            # Use DEVNULL for stdin so it cannot prompt even if it tries
-            result = subprocess.check_output(
-                command,
-                input=prompt,
+            result = subprocess.run(
+                ["gh", "copilot", "suggest", "--prompt", prompt, "--repo", f"{org}/{repo}"],
+                capture_output=True,
                 text=True,
-                stderr=subprocess.STDOUT,
-                env=env,
-                stdin=subprocess.DEVNULL,
             )
-            explanation, files = self._parse_copilot_output(result)
-            return {"explanation": explanation, "files": files}
-        except subprocess.CalledProcessError as e:
-            raise GoGoCopilotError(f"Failed to get solution from Copilot: {e.output.strip()}")
+            self.logger.debug(f"Copilot suggest command exit code: {result.returncode}")
+            if result.returncode != 0:
+                self.logger.error(f"Copilot suggest failed: {result.stderr}")
+                raise GoGoCopilotError("Failed to get Copilot suggestion.")
+            self.logger.info("Copilot suggestion received successfully.")
+            # Parse result.stdout as StructuredProposalResponse (JSON)
+            return StructuredProposalResponse.from_json(result.stdout)
         except Exception as e:
-            raise GoGoCopilotError(f"Failed to get solution from Copilot: {e}")
+            self.logger.exception("Error during suggest_solution")
+            raise GoGoCopilotError(str(e))
 
-    # ... rest of the code unchanged ...
+    def install_suggestion(self, proposal: StructuredProposalResponse):
+        self.logger.info("Installing proposal suggestion.")
+        for filename, content in proposal.files.items():
+            self.logger.debug(f"Writing file: {filename}")
+            with open(filename, "w") as f:
+                f.write(content)
+            self.logger.info(f"Wrote file: {filename}")
+        if proposal.patch:
+            self.logger.debug("Applying patch from proposal.")
+            patch_proc = subprocess.run(["git", "apply"], input=proposal.patch, text=True, capture_output=True)
+            self.logger.debug(f"Patch application exit code: {patch_proc.returncode}")
+            if patch_proc.returncode != 0:
+                self.logger.error(f"Failed to apply patch: {patch_proc.stderr}")
+                raise GoGoCopilotError("Patch application failed.")
+            self.logger.info("Patch applied successfully.")
