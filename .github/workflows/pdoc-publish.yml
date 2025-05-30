@@ -1,0 +1,42 @@
+name: Generate API Documentation with pdoc
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install pdoc
+        run: pip install pdoc
+
+      - name: Generate API docs
+        run: |
+          mkdir -p docs-out
+          pdoc --html --output-dir docs-out .
+
+      - name: Deploy to gh-pages (pdoc directory)
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: docs-out
+          target-folder: pdoc
+          commit-message: "Update API docs [skip ci]"
+          git-config-name: gogo-gadget
+          git-config-email: gogo-gadget@users.noreply.github.com
+          token: ${{ env.GITHUB_TOKEN }}
