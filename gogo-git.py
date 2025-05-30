@@ -1,5 +1,5 @@
 """
-go_go_git.py
+gogo-git.py
 
 Author: Copilot (GitHub Copilot, OpenAI, and contributors)
 Attribution: Generated with the help of GitHub Copilot and OpenAI's GPT models. Thanks to the authors of GitPython and the open-source community.
