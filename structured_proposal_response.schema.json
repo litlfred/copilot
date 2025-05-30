@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StructuredProposalResponse",
+  "type": "object",
+  "@context": {
+    "version": "https://schema.org/version",
+    "patch": "https://schema.org/text",
+    "explanation": "https://schema.org/description",
+    "errors": "https://schema.org/error",
+    "install": "https://schema.org/instructions",
+    "gadget": "https://schema.org/SoftwareApplication",
+    "commit_message": "https://schema.org/description"
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Version of the Structured Response specification that the response message adheres to, using SEMVER.",
+      "default": "v0.1"
+    },
+    "patch": {
+      "type": "string",
+      "description": "A string which can be applied as a git patch."
+    },
+    "explanation": {
+      "type": "string",
+      "description": "Optional explanation of the proposed solution as markdown text."
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional array of errors or warnings that prevented fully fulfilling the request."
+    },
+    "install": {
+      "type": "string",
+      "description": "Optional set of instructions that the user needs to take before or after installing the files."
+    },
+    "gadget": {
+      "type": "string",
+      "description": "The LLM/service that was used to respond to the user request."
+    },
+    "commit_message": {
+      "type": "string",
+      "description": "A proposed git commit message summarizing the proposed change."
+    }
+  },
+  "required": ["patch", "gadget", "commit_message"],
+  "additionalProperties": true
+}

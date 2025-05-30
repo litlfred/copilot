@@ -1,5 +1,4 @@
-"""
-gogo-git.py
+"""gogo-git.py
 
 Author: Copilot (GitHub Copilot, OpenAI, and contributors)
 Attribution: Generated with the help of GitHub Copilot and OpenAI's GPT models. Thanks to the authors of GitPython and the open-source community.
@@ -7,7 +6,6 @@ Attribution: Generated with the help of GitHub Copilot and OpenAI's GPT models. 
 An object-oriented, importable Python module for managing git repositories, executing git commands with logging, 
 and now also managing checks for gh CLI and Copilot CLI.
 """
-
 import os
 import subprocess
 import shutil
@@ -86,8 +84,7 @@ class GoGoGit:
         result = self._run_git(["status", "--porcelain"], capture_output=True)
         return result.stdout.strip() == ""
 
-    @staticmethod
-    def ensure_cloned(org: str, repo_name: str, base_dir: str) -> str:
+    def ensure_cloned(self, org: str, repo_name: str, base_dir: str) -> str:
         """Ensure that DIR/org/repo_name exists as a git repo, cloning if necessary."""
         repo_path = os.path.join(base_dir, org, repo_name)
         if not os.path.exists(repo_path):
@@ -124,22 +121,26 @@ class GoGoGit:
         except subprocess.CalledProcessError:
             return False
 
-    @staticmethod
-    def assert_gh_ready():
+    def assert_gh_ready(self):
         if not GoGoGit.is_gh_installed():
             raise GoGoGitError("GitHub CLI (gh) is not installed.")
         if not GoGoGit.is_gh_copilot_installed():
             raise GoGoGitError("GitHub Copilot CLI extension is not installed.")
         if not GoGoGit.is_gh_authenticated():
             raise GoGoGitError(
-                "No valid GitHub CLI access token detected.\n\n"
+                "No valid GitHub CLI access token detected.\n"
                 "To use GitHub Copilot in the CLI, you must authenticate the GitHub CLI using a personal access token (PAT).\n"
                 "Follow these steps:\n"
                 "1. Visit https://github.com/settings/tokens?type=beta\n"
                 "2. Generate a new fine-grained personal access token with these scopes: 'repo', 'read:org', and 'copilot'.\n"
                 "3. Save the token into a file, e.g. 'token.txt'.\n"
                 "4. Authenticate with the GitHub CLI by running:\n"
-                "     gh auth login --with-token < token.txt\n"
+                "    gh auth login --with-token < token.txt\n"
                 "5. After authenticating, re-run this script.\n"
                 "For more info, see: https://cli.github.com/manual/gh_auth_login\n"
             )
+
+    def apply_patch(self, patch_file):
+        """Apply a patch file to the repository using git apply."""
+        logging.info(f"Applying patch file: {patch_file}")
+        return self._run_git(['apply', patch_file])
