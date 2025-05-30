@@ -16,12 +16,6 @@ Classes
 
     ### Static methods
 
-    `assert_gh_ready()`
-    :
-
-    `ensure_cloned(org: str, repo_name: str, base_dir: str) ‑> str`
-    :   Ensure that DIR/org/repo_name exists as a git repo, cloning if necessary.
-
     `is_gh_authenticated() ‑> bool`
     :
 
@@ -39,8 +33,17 @@ Classes
     `add_commit_push(self, files: List[str], message: str, push: bool = False)`
     :   Add files, commit with message, and optionally push to origin.
 
+    `apply_patch(self, patch_file)`
+    :   Apply a patch file to the repository using git apply.
+
+    `assert_gh_ready(self)`
+    :
+
     `branch_exists(self, branch: str) ‑> bool`
     :
+
+    `ensure_cloned(self, org: str, repo_name: str, base_dir: str) ‑> str`
+    :   Ensure that DIR/org/repo_name exists as a git repo, cloning if necessary.
 
     `is_clean(self) ‑> bool`
     :   Check if the repository is clean (no uncommitted changes).
